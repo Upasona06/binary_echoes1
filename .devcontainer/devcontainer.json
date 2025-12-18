@@ -1,0 +1,25 @@
+{
+  "name": "SpendSense Full Stack",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+  "forwardPorts": [5000, 3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "Next.js Client",
+      "onAutoForward": "notify"
+    },
+    "5000": {
+      "label": "Express API Server",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "npm install -g nodemon && cd server && npm install && cd ../client && npm install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  }
+}
