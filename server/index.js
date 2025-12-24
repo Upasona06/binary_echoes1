@@ -21,6 +21,24 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/spendsens
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'SpendSense API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      expenses: '/api/expenses',
+      budgets: '/api/budgets',
+      analytics: '/api/analytics',
+      badges: '/api/badges',
+      streak: '/api/streak'
+    }
+  });
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/expenses', expenseRoutes);
