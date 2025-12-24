@@ -4,6 +4,16 @@ const Expense = require('../models/Expense');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 
+// Badge definitions for displaying full info
+const BADGE_INFO = {
+  'first_expense': { name: 'First Step', description: 'Added your first expense' },
+  'week_saver': { name: 'Week Saver', description: 'Stayed under budget for 7 days' },
+  'budget_master': { name: 'Budget Master', description: 'Completed a month under budget' },
+  'penny_pincher': { name: 'Penny Pincher', description: 'Saved 50% of allowance' },
+  'streak_warrior': { name: 'Streak Warrior', description: 'Maintained 14-day streak' },
+  'financial_guru': { name: 'Financial Guru', description: 'Tracked expenses for 3 months' }
+};
+
 // Get dashboard analytics
 router.get('/dashboard', auth, async (req, res) => {
   try {
@@ -91,8 +101,14 @@ router.get('/dashboard', auth, async (req, res) => {
       gamification: {
         currentStreak: user.savingStreak || 0,
         longestStreak: user.longestStreak || 0,
-        disciplineScore: user.budgetDisciplineScore || 0,
-        badges: user.badges || []
+        disciplineScore: user.budgetDisciplineScore || 100,
+        badges: (user.badges || []).map(badgeId => ({
+          id: badgeId,
+          badgeId: badgeId,
+          name: BADGE_INFO[badgeId]?.name || badgeId,
+          description: BADGE_INFO[badgeId]?.description || '',
+          earnedAt: user.badgeEarnedDates?.get?.(badgeId) || user.badgeEarnedDates?.[badgeId] || null
+        }))
       },
       totalSpent,
       remainingAllowance,

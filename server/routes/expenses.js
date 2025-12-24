@@ -46,6 +46,139 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
+// Badge definitions for checking
+const BADGE_DEFINITIONS = [
+  {
+    id: 'first_expense',
+    checkCondition: async (user, expenses) => expenses.length >= 1
+  },
+  {
+    id: 'week_saver',
+    checkCondition: async (user, expenses) => user.savingStreak >= 7
+  },
+  {
+    id: 'budget_master',
+    checkCondition: async (user, expenses) => {
+      const now = new Date();
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+      const lastMonthExpenses = await Expense.find({
+        user: user._id,
+        date: { $gte: lastMonth, $lte: lastMonthEnd }
+      });
+      const totalSpent = lastMonthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+      return totalSpent <= user.monthlyAllowance && totalSpent > 0;
+    }
+  },
+  {
+    id: 'penny_pincher',
+    checkCondition: async (user, expenses) => {
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthExpenses = await Expense.find({
+        user: user._id,
+        date: { $gte: monthStart }
+      });
+      const totalSpent = monthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+      return totalSpent <= user.monthlyAllowance * 0.5;
+    }
+  },
+  {
+    id: 'streak_warrior',
+    checkCondition: async (user, expenses) => user.savingStreak >= 14
+  },
+  {
+    id: 'financial_guru',
+    checkCondition: async (user, expenses) => {
+      const threeMonthsAgo = new Date();
+      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+      const oldExpenses = await Expense.find({
+        user: user._id,
+        date: { $lte: threeMonthsAgo }
+      });
+      return oldExpenses.length > 0;
+    }
+  }
+];
+
+// Helper function to update streak
+const updateStreak = async (userId) => {
+  const user = await User.findById(userId);
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  
+  const expenses = await Expense.find({
+    user: userId,
+    date: { $gte: monthStart }
+  });
+  
+  const totalSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const currentDay = now.getDate();
+  const expectedSpendingByNow = (user.monthlyAllowance / daysInMonth) * currentDay;
+  
+  // Check if last active was today to prevent multiple streak updates
+  const lastActive = user.lastActiveDate ? new Date(user.lastActiveDate) : null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const wasActiveToday = lastActive && lastActive >= today;
+  
+  if (!wasActiveToday) {
+    if (totalSpent <= expectedSpendingByNow || user.monthlyAllowance === 0) {
+      user.savingStreak = (user.savingStreak || 0) + 1;
+      if (user.savingStreak > (user.longestStreak || 0)) {
+        user.longestStreak = user.savingStreak;
+      }
+    } else {
+      user.savingStreak = 0;
+    }
+  }
+  
+  // Update discipline score
+  const budgetPerformance = user.monthlyAllowance > 0 
+    ? Math.max(0, Math.min(100, 100 - ((totalSpent / user.monthlyAllowance - 1) * 100)))
+    : 100;
+  
+  user.budgetDisciplineScore = Math.round(budgetPerformance);
+  
+  await user.save();
+  return user;
+};
+
+// Helper function to check and award badges
+const checkBadges = async (userId) => {
+  const user = await User.findById(userId);
+  const expenses = await Expense.find({ user: userId });
+  const newBadges = [];
+  
+  for (const badgeDef of BADGE_DEFINITIONS) {
+    if (user.badges && user.badges.includes(badgeDef.id)) {
+      continue;
+    }
+    
+    const earned = await badgeDef.checkCondition(user, expenses);
+    
+    if (earned) {
+      if (!user.badges) user.badges = [];
+      user.badges.push(badgeDef.id);
+      
+      if (!user.badgeEarnedDates) {
+        user.badgeEarnedDates = new Map();
+      }
+      user.badgeEarnedDates.set(badgeDef.id, new Date());
+      
+      newBadges.push(badgeDef.id);
+    }
+  }
+  
+  if (newBadges.length > 0) {
+    await user.save();
+  }
+  
+  return newBadges;
+};
+
 // Create expense
 router.post('/', auth, async (req, res) => {
   try {
@@ -65,10 +198,18 @@ router.post('/', auth, async (req, res) => {
       paymentMethod: paymentMethod || 'cash'
     });
     
+    // Update streak and check badges after adding expense
+    await updateStreak(req.user.id);
+    const newBadges = await checkBadges(req.user.id);
+    
     // Update user's last active date
     await User.findByIdAndUpdate(req.user.id, { lastActiveDate: new Date() });
     
-    res.status(201).json({ expense, message: 'Expense added successfully' });
+    res.status(201).json({ 
+      expense, 
+      message: 'Expense added successfully',
+      newBadges: newBadges.length > 0 ? newBadges : undefined
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }

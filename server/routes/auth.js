@@ -2,8 +2,10 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
+const { sendEmail, getPasswordResetTemplate } = require('../utils/sendEmail');
 
 // Register
 router.post('/register', async (req, res) => {
@@ -182,6 +184,151 @@ router.put('/change-password', auth, async (req, res) => {
     await user.save();
 
     res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Forgot password - generate reset token
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      // Don't reveal if user exists for security
+      return res.json({ 
+        message: 'If an account with that email exists, a password reset link has been sent.',
+        success: true
+      });
+    }
+
+    // Generate reset token
+    const resetToken = user.getResetPasswordToken();
+    await user.save({ validateBeforeSave: false });
+
+    // Create reset URL
+    const resetUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
+
+    // Check if email is configured
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      try {
+        // Send email
+        await sendEmail({
+          email: user.email,
+          subject: 'SpendSense - Password Reset Request',
+          html: getPasswordResetTemplate(resetUrl, user.name)
+        });
+
+        console.log('Password reset email sent to:', user.email);
+
+        res.json({ 
+          message: 'Password reset link has been sent to your email.',
+          success: true,
+          emailSent: true
+        });
+      } catch (emailError) {
+        console.error('Email sending failed:', emailError);
+        // Clear reset token if email fails
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+        await user.save({ validateBeforeSave: false });
+
+        res.status(500).json({ 
+          message: 'Failed to send email. Please try again later.',
+          success: false
+        });
+      }
+    } else {
+      // Development mode - no email configured
+      console.log('Email not configured. Password reset URL:', resetUrl);
+
+      res.json({ 
+        message: 'Email service not configured. Using development mode.',
+        success: true,
+        emailSent: false,
+        // Include reset token for development testing
+        resetToken,
+        resetUrl
+      });
+    }
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Verify reset token is valid
+router.get('/verify-reset-token/:token', async (req, res) => {
+  try {
+    // Hash the token from params
+    const resetPasswordToken = crypto
+      .createHash('sha256')
+      .update(req.params.token)
+      .digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ 
+        message: 'Invalid or expired reset token',
+        valid: false
+      });
+    }
+
+    res.json({ 
+      message: 'Token is valid',
+      valid: true
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Reset password with token
+router.post('/reset-password/:token', async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    // Hash the token from params
+    const resetPasswordToken = crypto
+      .createHash('sha256')
+      .update(req.params.token)
+      .digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired reset token' });
+    }
+
+    // Set new password
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    // Generate new auth token
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'your-secret-key', {
+      expiresIn: '30d'
+    });
+
+    res.json({ 
+      message: 'Password reset successful',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        monthlyAllowance: user.monthlyAllowance
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }

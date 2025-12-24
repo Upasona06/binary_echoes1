@@ -86,11 +86,15 @@ export default function Badges() {
 
       // Merge earned badges with definitions
       const details = BADGE_DEFINITIONS.map(badge => {
-        const isEarned = earnedBadges.includes(badge.id);
+        // Handle both array of objects and array of strings
+        const earnedBadge = earnedBadges.find(b => 
+          (typeof b === 'string' ? b : b.id || b.badgeId) === badge.id
+        );
+        const isEarned = !!earnedBadge;
         return {
           ...badge,
           earned: isEarned,
-          earnedDate: isEarned ? user.badgeEarnedDates?.[badge.id] || new Date() : null
+          earnedDate: isEarned ? (earnedBadge?.earnedAt || new Date()) : null
         };
       });
 

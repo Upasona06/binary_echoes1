@@ -3,7 +3,14 @@ import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
 import api from '@/lib/axios';
 import DashboardLayout from '@/components/Dashboard/DashboardLayout';
-import { User, Wallet, DollarSign, Save, AlertCircle } from 'lucide-react';
+import { User, Wallet, DollarSign, Save, AlertCircle, Bell, Clock } from 'lucide-react';
+import { 
+  areNotificationsEnabled, 
+  initNotifications, 
+  getReminderTime, 
+  setReminderTime as saveReminderTime,
+  sendNotification
+} from '@/lib/notifications';
 
 const CATEGORIES = ['food', 'travel', 'bills', 'subscriptions', 'others'];
 
@@ -12,6 +19,10 @@ export default function Settings() {
   const { user, loading: authLoading, checkAuth } = useAuth();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  
+  // Notification settings
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [reminderTime, setReminderTimeState] = useState('20:00');
   
   const [profileData, setProfileData] = useState({
     name: '',
@@ -40,6 +51,14 @@ export default function Settings() {
       router.push('/login');
     }
   }, [user, authLoading, router]);
+
+  // Initialize notification settings
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setNotificationsEnabled(areNotificationsEnabled());
+      setReminderTimeState(getReminderTime());
+    }
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -131,6 +150,40 @@ export default function Settings() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Handle enabling notifications
+  const handleEnableNotifications = async () => {
+    const enabled = await initNotifications();
+    setNotificationsEnabled(enabled);
+    
+    if (enabled) {
+      sendNotification('🔔 Notifications Enabled!', {
+        body: 'You\'ll now receive daily expense reminders.',
+        icon: '/favicon.ico'
+      });
+      setMessage({ type: 'success', text: 'Notifications enabled successfully!' });
+    } else {
+      setMessage({ type: 'error', text: 'Could not enable notifications. Please check your browser settings.' });
+    }
+  };
+
+  // Handle reminder time change
+  const handleReminderTimeChange = (e) => {
+    const newTime = e.target.value;
+    setReminderTimeState(newTime);
+    saveReminderTime(newTime);
+    setMessage({ type: 'success', text: `Reminder time set to ${newTime}` });
+  };
+
+  // Test notification
+  const handleTestNotification = () => {
+    if (notificationsEnabled) {
+      sendNotification('🧪 Test Notification', {
+        body: 'This is a test notification from SpendSense!',
+        icon: '/favicon.ico'
+      });
     }
   };
 
@@ -356,6 +409,93 @@ export default function Settings() {
               {loading ? 'Changing...' : 'Change Password'}
             </button>
           </form>
+        </div>
+
+        {/* Notification Settings */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <Bell className="w-6 h-6 text-primary-600" />
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+              Notification Settings
+            </h2>
+          </div>
+          
+          <div className="space-y-5">
+            {/* Notification Status */}
+            <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className={`w-3 h-3 rounded-full ${notificationsEnabled ? 'bg-green-500' : 'bg-gray-400'}`} />
+                <div>
+                  <p className="font-medium text-gray-900 dark:text-white">
+                    Browser Notifications
+                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {notificationsEnabled 
+                      ? 'You\'ll receive daily expense reminders' 
+                      : 'Enable to get reminded to track expenses'}
+                  </p>
+                </div>
+              </div>
+              {!notificationsEnabled ? (
+                <button
+                  onClick={handleEnableNotifications}
+                  className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Enable
+                </button>
+              ) : (
+                <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-sm font-medium rounded-full">
+                  Enabled
+                </span>
+              )}
+            </div>
+
+            {/* Reminder Time Setting */}
+            {notificationsEnabled && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-gray-400" />
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Daily Reminder Time
+                  </label>
+                </div>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="time"
+                    value={reminderTime}
+                    onChange={handleReminderTimeChange}
+                    className="input-field w-40"
+                  />
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    You'll be reminded if no expenses are logged by this time
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Test Notification */}
+            {notificationsEnabled && (
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={handleTestNotification}
+                  className="text-sm text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-2"
+                >
+                  <Bell className="w-4 h-4" />
+                  Send Test Notification
+                </button>
+              </div>
+            )}
+
+            {/* Browser Support Info */}
+            {typeof window !== 'undefined' && !('Notification' in window) && (
+              <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                <AlertCircle className="w-5 h-5 text-yellow-600" />
+                <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                  Your browser doesn't support notifications
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </DashboardLayout>
